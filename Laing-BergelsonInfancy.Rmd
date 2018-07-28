@@ -1,0 +1,551 @@
+---
+title: "Laing-Bergelson-Infancy"
+author: "Catherine Laing & Elika Bergelson"
+date: "July 27, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(lme4)
+library(effsize)
+
+source("Demographics.R")
+
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+  
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+  
+  numPlots = length(plots)
+  
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+  
+  if (numPlots==1) {
+    print(plots[[1]])
+    
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+    
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+See Table 1 for age information
+
+```{r Table 1 - Mean age}
+read_csv("data/17_month_ages.csv") %>%
+  summarise(mean_age_CDI = mean(days_CDI, na.rm=T), 
+            sd_age_CDI = sd(days_CDI, na.rm=T),
+            mean_age_video = mean(days_video, na.rm=T),
+            sd_age_video = sd(days_video, na.rm=T),
+            mean_age_audio = mean(days_audio, na.rm=T),
+            sd_age_audio = sd(days_audio, na.rm=T),
+            mean_age_demo18 = mean(days_demo18, na.rm=T),
+            sd_age_demo18 = sd(days_demo18, na.rm=T),
+            mean_age_demo6 = mean(days_demo6, na.rm=T),
+            sd_age_demo6 = sd(days_demo6, na.rm=T))
+```
+
+
+FT mothers worked an average of 38 hours/week (Range: 30-45, SD=4.4) and PT mothers worked an average of 18.5 hours/week (Range=6-25, SD=6). 
+```{r Summary of work status groups}
+workdata %>%  
+  group_by(MOTwork18) %>%
+  summarize(mean_MOTwork18 = mean(MOTworkhours18, na.rm=T),
+           mdn_MOTwork18 = median(MOTworkhours18, na.rm=T),
+           sd_MOTwork18 = sd(MOTworkhours18, na.rm=T),
+           min_MOTwork18 = min(MOTworkhours18, na.rm=T),
+           max_MOTwork18 = max(MOTworkhours18, na.rm=T))
+
+workdata %>%  
+  group_by(MOTwork6) %>%
+  summarize(mean_MOTwork6 = mean(MOTworkhours6, na.rm=T),
+           mdn_MOTwork6 = median(MOTworkhours6, na.rm=T),
+           sd_MOTwork6 = sd(MOTworkhours6, na.rm=T),
+           min_MOTwork6 = min(MOTworkhours6, na.rm=T),
+           max_MOTwork6 = max(MOTworkhours6, na.rm=T))
+```
+
+
+```{r Caretype groups}
+workdata <- workdata %>%
+   mutate(caretype = ifelse(MOTwork18 == "Full-time" & MOTwork6 == "Full-time", "Care-only", "Other"),
+          caretype = ifelse(MOTwork18 == "Full-time" & MOTwork6 == "Part-time", "Mixed-care-nonmaternal", caretype),
+          caretype = ifelse(MOTwork18 == "Full-time" & MOTwork6 == "Home", "Mixed-care-maternal", caretype),
+          caretype = ifelse(MOTwork18 == "Part-time" & MOTwork6 == "Part-time", "Mixed-care-equal", caretype),
+          caretype = ifelse(MOTwork18 == "Part-time" & MOTwork6 == "Home", "Mixed-care-maternal2", caretype),
+          caretype = ifelse(MOTwork18 == "Home" & MOTwork6 == "Home", "Home-only", caretype))
+
+```
+
+```{r Caretype group size}
+
+workdata %>% group_by(caretype, sex) %>% tally()
+
+workdata <- workdata %>% mutate(caretype = fct_recode(caretype, 
+                                                      "Mixed-care" = "Mixed-care-nonmaternal",
+                                                      "Mixed-care" = "Mixed-care-maternal",
+                                                      "Mixed-care" = "Mixed-care-equal",
+                                                      "Mixed-care" = "Mixed-care-maternal2",
+                                                      "Home-only" = "Other"))
+
+write_csv(workdata, "data/workdata.csv") # save for Bayes analysis
+
+```
+
+Five infants' (2 females) CDI data was not available, but audio and video data were recorded for all 44 infants. Shapiro-Wilkes tests revealed that all three vocabulary measures (CDI, types, and tokens) were not normally distributed. They were thus log-transformed (after adding one, since four infants produced zero words in the recorded data; reported vocabulary ranged from 1-372 words; M=60.44, SD=76.3). 
+
+```{r Summary of data}
+
+workdata %>% filter(noCDI==T) # CDIs unavailable for 5 infants
+
+workdata %>%
+  mutate(nowords = ifelse(CDI == 0, T, F)) %>%
+  filter(nowords == TRUE) # 0 infants + 5 with no cdi at all
+
+workdata %>%
+  mutate(nowords = ifelse(CHItokens == 0, T, F)) %>%
+  filter(nowords == TRUE) # 5 infants
+
+workdata %>%
+  summarize(meanProd = mean((CDI), na.rm=T),
+           sdProd = sd((CDI), na.rm=T),
+           maxProd = max(CDI, na.rm=T),
+           minProd = min(CDI, na.rm=T))
+```
+
+Pearson product-moment correlations on the log-transformed data revealed significant correlations between our three measures (see Table 3), substantiating the parental report data.
+
+```{r Correlation between variables - table 3}
+cor.test(workdata$Log.CDI, workdata$Log.CDInouns, method = 'pearson') # significant, p<.001
+cor.test(workdata$Log.CDI, workdata$Log.Types, method = 'pearson') # significant, p<.001
+cor.test(workdata$Log.CDI, workdata$Log.Tokens, method = 'pearson') # significant, p<.001
+
+cor.test(workdata$Log.CDInouns, workdata$Log.Types, method = 'pearson') # significant, p<.001
+cor.test(workdata$Log.CDInouns, workdata$Log.Tokens, method = 'pearson') # significant, p<.001
+
+cor.test(workdata$Log.Types, workdata$Log.Tokens, method = 'pearson') # significant, p<.001
+```
+
+```{r Testing CDI data}
+shapiro.test(workdata$CDI) # not normal
+shapiro.test(workdata$Log.CDI) # normal
+
+workdata <- workdata %>%
+  mutate(outlier.CDI = (Log.CDI > 
+                      (mean(Log.CDI, na.rm=T) + 
+                         3*(sd(Log.CDI, na.rm=T))) |
+                      Log.CDI <
+                      (mean(Log.CDI, na.rm=T) - 
+                         3*(sd(Log.CDI, na.rm=T)))))
+
+workdata %>% filter(outlier.CDI == T) # no outliers
+
+workdata %>% summarize(M = mean(CDI, na.rm=T), 
+                                              SD = sd(CDI, na.rm=T))
+
+workdata %>% group_by(caretype) %>% summarize(M = mean(CDI, na.rm=T), 
+                                              SD = sd(CDI, na.rm=T))
+
+mod1cdi<- lm(Log.CDI~caretype, workdata)
+mod2cdi<- lm(Log.CDI~caretype+sex+MOTedu, workdata)
+mod3cdi<- lm(Log.CDI~caretype+sex+PVTscore, workdata)
+mod4cdi<- lm(Log.CDI~sex+PVTscore, workdata)
+mod5cdi<- lm(Log.CDI~sex+MOTedu, workdata)
+anova(mod1cdi)#ct accounts for variance on its own
+anova(mod3cdi,mod4cdi)#ct+s+p is better than just s+p
+anova(mod2cdi,mod5cdi)#ct+s+m is NOT better than just s+m
+```
+
+```{r Testing CDI comp data}
+
+workdata <- workdata %>%
+  mutate(outlier.CDIcomp = (Log.CDIcomp > 
+                      (mean(Log.CDIcomp, na.rm=T) + 
+                         3*(sd(Log.CDIcomp, na.rm=T))) |
+                      Log.CDIcomp <
+                      (mean(Log.CDIcomp, na.rm=T) - 
+                         3*(sd(Log.CDIcomp, na.rm=T)))))
+
+workdata %>% filter(outlier.CDIcomp == T) # 34 is an outlier
+
+workdata.comp <- workdata %>% filter(subj != "34")
+
+shapiro.test(workdata.comp$CDIcomp) # not normal
+shapiro.test(workdata.comp$Log.CDIcomp) # not normal
+
+
+workdata.comp %>% summarize(M = mean(CDIcomp, na.rm=T), 
+                                              SD = sd(CDIcomp, na.rm=T))
+
+workdata.comp %>% group_by(caretype) %>% summarize(M = mean(CDIcomp, na.rm=T), 
+                                              SD = sd(CDIcomp, na.rm=T))
+
+modelCDIcomp <- lm(Log.CDIcomp ~ sex + PVTscore + MOTedu + caretype, workdata.comp) 
+modelCDIcomp.null <- lm(Log.CDIcomp ~ sex + PVTscore + MOTedu, workdata.comp)
+
+anova(modelCDIcomp, modelCDIcomp.null) # n.s.
+```
+
+
+```{r Testing types data}
+shapiro.test(workdata$CHItypes) # not normal
+shapiro.test(workdata$Log.Types) # normal
+
+workdata <- workdata %>%
+  mutate(outlier.types = (Log.Types > 
+                      (mean(Log.Types, na.rm=T) + 
+                         3*(sd(Log.Types, na.rm=T))) |
+                      Log.Types <
+                      (mean(Log.Types, na.rm=T) - 
+                         3*(sd(Log.Types, na.rm=T)))))
+
+workdata %>% filter(outlier.types == T) # no outliers
+
+workdata %>% summarize(M = mean(CHItypes, na.rm=T), 
+                                              SD = sd(CHItypes, na.rm=T))
+
+workdata %>% group_by(caretype) %>% summarize(M = mean(CHItypes, na.rm=T), 
+                                              SD = sd(CHItypes, na.rm=T))
+
+
+mod1types<- lm(Log.Types~caretype, workdata)
+mod2types<- lm(Log.Types~caretype+sex+MOTedu, workdata)
+mod3types<- lm(Log.Types~caretype+sex+PVTscore, workdata)
+mod4types<- lm(Log.Types~sex+PVTscore, workdata)
+mod5types<- lm(Log.Types~sex+MOTedu, workdata)
+anova(mod1types)#ct accounts for var on its own
+anova(mod3types,mod4types)#adding ct to s&pvt helps
+anova(mod2types, mod5types)#adding ct to s&motedu helps
+
+
+```
+
+
+```{r Testing tokens data}
+shapiro.test(workdata$CHItokens) # not normal
+shapiro.test(workdata$Log.Tokens) # normal
+
+workdata <- workdata %>%
+  mutate(outlier.tokens = (Log.Tokens > 
+                      (mean(Log.Tokens, na.rm=T) + 
+                         3*(sd(Log.Tokens, na.rm=T))) |
+                      Log.Tokens <
+                      (mean(Log.Tokens, na.rm=T) - 
+                         3*(sd(Log.Tokens, na.rm=T)))))
+
+workdata %>% filter(outlier.tokens == T) # no outliers
+
+workdata %>% summarize(M = mean(CHItokens, na.rm=T), 
+                                              SD = sd(CHItokens, na.rm=T))
+
+workdata %>% group_by(caretype) %>% summarize(M = mean(CHItokens, na.rm=T), 
+                                              SD = sd(CHItokens, na.rm=T))
+
+mod1tokens<- lm(Log.Tokens~caretype, workdata)
+mod2tokens<- lm(Log.Tokens~caretype+sex+MOTedu, workdata)
+mod3tokens<- lm(Log.Tokens~caretype+sex+PVTscore, workdata)
+mod4tokens<- lm(Log.Tokens~sex+PVTscore, workdata)
+mod5tokens<- lm(Log.Tokens~sex+MOTedu, workdata)
+anova(mod1tokens)#ct accounts for var on its own
+anova(mod3tokens,mod4tokens)#adding ct to s&pvt helps
+anova(mod2tokens, mod5tokens)#adding ct to s&motedu helps
+
+```
+
+
+```{r post-hoc tests}
+
+Home <- subset(workdata, caretype == "Home-only")
+Mixed <- subset(workdata, caretype == "Mixed-care")
+Full <- subset(workdata, caretype == "Care-only")
+
+# CDI
+
+t.test(Home$Log.CDI, Mixed$Log.CDI) # p<.05
+t.test(Full$Log.CDI, Mixed$Log.CDI) # ns
+t.test(Home$Log.CDI, Full$Log.CDI) # ns
+
+cohen.d(Home$Log.CDI, Mixed$Log.CDI, na.rm=T, pooled=T) # -.88, large
+cohen.d(Full$Log.CDI, Mixed$Log.CDI, na.rm=T, pooled=T) # -.6, medium
+cohen.d(Full$Log.CDI, Home$Log.CDI, na.rm=T, pooled=T) # .35, small
+
+
+# Types
+
+t.test(Home$Log.Types, Mixed$Log.Types) # p=.02
+t.test(Full$Log.Types, Mixed$Log.Types) # p=.001
+t.test(Home$Log.Types, Full$Log.Types) # ns
+
+
+cohen.d(Home$Log.Types, Mixed$Log.Types, na.rm=T, pooled=T) # -.98, large
+cohen.d(Full$Log.Types, Mixed$Log.Types, na.rm=T, pooled=T) # -1.33, large
+cohen.d(Full$Log.Types, Home$Log.Types, na.rm=T, pooled=T) # -.36, small
+
+# Tokens
+
+t.test(Home$Log.Tokens, Mixed$Log.Tokens) # p=.009
+t.test(Full$Log.Tokens, Mixed$Log.Tokens) # p<.001
+t.test(Home$Log.Tokens, Full$Log.Tokens) # n.s.
+
+cohen.d(Home$Log.Tokens, Mixed$Log.Tokens, na.rm=T, pooled=T) # -1.06, large
+cohen.d(Full$Log.Tokens, Mixed$Log.Tokens, na.rm=T, pooled=T) # -1.6, large
+cohen.d(Full$Log.Tokens, Home$Log.Tokens, na.rm=T, pooled=T) # -.5, small
+
+```
+
+```{r data for t tests in JASP}
+workdata %>% filter(caretype != "Home-only") %>% write.csv("data/noHomebayes.csv")
+workdata %>% filter(caretype != "Mixed-care") %>% write.csv("data/noMixedbayes.csv")
+workdata %>% filter(caretype != "Care-only") %>% write.csv("data/noFullbayes.csv")
+```
+
+```{r, Figure 1}
+Figure1a <- ggplot(workdata, mapping=aes(y=Log.CDI, x=caretype, fill=caretype)) + 
+  geom_violin(alpha=0.5) + 
+  stat_summary(fun.y=mean, geom = "point", aes(group = subj), shape=1, size=3, colour = "black", position = position_jitter(.03)) +
+  stat_summary(fun.data=mean_cl_boot, geom = "errorbar", colour='red',  width =.2, size = .8) +
+  stat_summary(fun.y=mean, geom = "point", colour='white',  shape=24, fill = "red", size = 5) +
+  scale_x_discrete(name=element_blank(),limits=c("Home-only", "Mixed-care", "Care-only"), labels=c("Home-only", "Mixed-care", "Care-only")) +
+  scale_y_discrete(limits = c(1.791759, 3.931826, 5.942799),
+                     labels = c("5", "50", "380")) +
+  guides(fill=guide_legend(title=NULL)) + 
+  guides(fill=FALSE, colour = F) +
+  ylab('Productive vocabulary at 1;5') + xlab('') +
+  theme_bw(base_size=24) +
+  theme(axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        legend.title=element_blank())+
+  scale_color_manual(values = c("black","grey")) +
+  ggtitle("CDI")
+#plot(Figure1a)
+Figure1b <- ggplot(workdata, mapping=aes(y=Log.Types, x=caretype, fill=caretype)) + 
+  geom_violin(alpha=0.5) + 
+  stat_summary(fun.y=mean, geom = "point", aes(group = subj), shape=1, size=3, colour = "black", position = position_jitter(.03)) +
+  stat_summary(fun.data=mean_cl_boot, geom = "errorbar", colour='red',  width =.2, size = .8) +
+  stat_summary(fun.y=mean, geom = "point", colour='white',  shape=24, fill = "red", size = 5) +
+  scale_x_discrete(name=element_blank(),limits=c("Home-only", "Mixed-care", "Care-only"), labels=c("Home-only", "Mixed-care", "Care-only")) +
+  scale_y_discrete(limits = c(0, 0.6931472, 1.94591, 3.044522, 4.0073332),
+                     labels = c("0", "1", "6", "20", "54")) +
+  guides(fill=guide_legend(title=NULL)) + 
+  guides(fill=FALSE, colour = F) +
+  ylab('') + xlab('') +
+  theme_bw(base_size=24) +
+  theme(axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        legend.title=element_blank())+
+  scale_color_manual(values = c("black","grey")) +
+  ggtitle("Noun Types")
+
+Figure1c <- ggplot(workdata, mapping=aes(y=Log.Tokens, x=caretype, fill=caretype)) + 
+    geom_violin(alpha=0.5) + 
+  stat_summary(fun.y=mean, geom = "point", aes(group = subj), shape=1, size=3, colour = "black", position = position_jitter(.03)) +
+  stat_summary(fun.data=mean_cl_boot, geom = "errorbar", colour='red',  width =.2, size = .8) +
+  stat_summary(fun.y=mean, geom = "point", colour='white',  shape=24, fill = "red", size = 5) +
+  scale_x_discrete(name=element_blank(),limits=c("Home-only", "Mixed-care", "Care-only"), labels=c("Home-only", "Mixed-care", "Care-only")) +
+    scale_y_discrete(limits = c(0, 1.94591, 4.0073332, 5.620401),
+                     labels = c("0", "6", "54", "275")) +
+  guides(fill=guide_legend(title=NULL)) + 
+  guides(fill=FALSE, colour = F) +
+  ylab('') + xlab('') +
+  theme_bw(base_size=24) +
+  theme(axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        legend.title=element_blank()) +
+  scale_color_manual(values = c("black","grey")) +
+  ggtitle("Noun Tokens")
+#plot(Figure1c)
+multiplot(Figure1a, Figure1b, Figure1c, cols=3)
+```
+
+
+```{r, Figure 1 not log-transformed}
+Figure1a <- ggplot(workdata, mapping=aes(y=CDI, x=caretype, fill=caretype)) + 
+  geom_violin(alpha=0.5) + 
+  stat_summary(fun.y=mean, geom = "point", aes(group = subj), shape=1, size=3, colour = "black") +
+  stat_summary(fun.data=mean_cl_boot, geom = "errorbar", colour='red',  width =.2, size = .8) +
+  stat_summary(fun.y=mean, geom = "point", colour='white',  shape=24, fill = "red", size = 5) +
+  scale_x_discrete(name=element_blank(),limits=c("Home-only", "Mixed-care", "Care-only"), labels=c("Home-only", "Mixed-care", "Care-only")) +
+  guides(fill=guide_legend(title=NULL)) + 
+  guides(fill=FALSE, colour = F) +
+  ylab('Productive vocabulary at 1;5') + xlab('') +
+  theme_bw(base_size=24) +
+  theme(axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        legend.title=element_blank())+
+  scale_color_manual(values = c("black","grey")) +
+  ggtitle("CDI")
+Figure1b <- ggplot(workdata, mapping=aes(y=CHItypes, x=caretype, fill=caretype)) + 
+  geom_violin(alpha=0.5) + 
+  stat_summary(fun.y=mean, geom = "point", aes(group = subj), shape=1, size=3, colour = "black") +
+  stat_summary(fun.data=mean_cl_boot, geom = "errorbar", colour='red',  width =.2, size = .8) +
+  stat_summary(fun.y=mean, geom = "point", colour='white',  shape=24, fill = "red", size = 5) +
+  scale_x_discrete(name=element_blank(),limits=c("Home-only", "Mixed-care", "Care-only"), labels=c("Home-only", "Mixed-care", "Care-only")) +
+  guides(fill=guide_legend(title=NULL)) + 
+  guides(fill=FALSE, colour = F) +
+  ylab('') + xlab('') +
+  theme_bw(base_size=24) +
+  theme(axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        legend.title=element_blank())+
+  scale_color_manual(values = c("black","grey")) +
+  ggtitle("Noun Types")
+
+Figure1c <- ggplot(workdata, mapping=aes(y=CHItokens, x=caretype, fill=caretype)) + 
+    geom_violin(alpha=0.5) + 
+  stat_summary(fun.y=mean, geom = "point", aes(group = subj), shape=1, size=3, colour = "black") +
+  stat_summary(fun.data=mean_cl_boot, geom = "errorbar", colour='red',  width =.2, size = .8) +
+  stat_summary(fun.y=mean, geom = "point", colour='white',  shape=24, fill = "red", size = 5) +
+  scale_x_discrete(name=element_blank(),limits=c("Home-only", "Mixed-care", "Care-only"), labels=c("Home-only", "Mixed-care", "Care-only")) +
+  guides(fill=guide_legend(title=NULL)) + 
+  guides(fill=FALSE, colour = F) +
+  ylab('') + xlab('') +
+  theme_bw(base_size=24) +
+  theme(axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        legend.title=element_blank()) +
+  scale_color_manual(values = c("black","grey")) +
+  ggtitle("Noun Tokens")
+
+multiplot(Figure1a, Figure1b, Figure1c, cols=3)
+```
+
+# Supplementary data
+
+```{r Work status group size for supplementary materials}
+workdata %>% group_by(MOTwork6, sex) %>% tally()
+
+workdata %>% group_by(MOTwork18, sex) %>% tally()
+
+workdata %>% group_by(MOTwork6, MOTedu) %>% tally()
+
+workdata %>% group_by(MOTwork18, MOTedu) %>% tally()
+
+workdata %>% group_by(MOTwork18, family_size) %>% tally()
+
+workdata %>% group_by(MOTwork6, family_size) %>% tally()
+
+workdata %>% group_by(MOTwork18, siblings) %>% tally()
+
+workdata %>% group_by(MOTwork6, siblings) %>% tally()
+
+workdata %>% group_by(FATwork6, MOTwork6) %>% tally()
+
+workdata %>% group_by(FATwork18, MOTwork18) %>% tally()
+
+FigS1a <- ggplot(workdata, aes(x=MOTworkhours6, fill=MOTwork6)) +
+    geom_histogram(binwidth = 1.5) +
+  theme_bw() +
+  theme(legend.title=element_blank(),
+        legend.position=c(.80, .85)) +
+  xlab("Hours worked at 6 months") +
+    coord_cartesian(ylim=c(0, 20))
+
+
+FigS1b <- ggplot(workdata, aes(x=MOTworkhours18, fill=MOTwork18)) +
+    geom_histogram(binwidth = 1.5) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  xlab("Hours worked at 18 months") +
+  coord_cartesian(ylim=c(0, 20))
+
+multiplot(FigS1a, FigS1b, cols=2)
+```
+
+```{r Distribution of working hours across groups 6m}
+FigS2a <- ggplot(workdata) +
+  geom_point(mapping=aes(x=MOTworkhours6, y=CHItypes, colour=MOTwork6, shape=MOTwork6), position=position_jitter(0.1), size=3) +
+  scale_colour_manual(name = "Care Schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values = c("#F8766D", "#00BA38", "#619CFF")) +
+  scale_shape_manual(name = "Care schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values=c(0,1,2)) +
+  geom_smooth(mapping=aes(x=MOTworkhours6, y=CHItypes), method='lm') +
+  guides(fill=guide_legend(title=NULL)) +
+  ylab('Word types produced at 1;5') + xlab("Mothers' weekly work hours at 6m") +
+  theme_bw(base_size=12) +
+  theme(legend.position = 'none')
+
+FigS2b <- ggplot(workdata) +
+  geom_point(mapping=aes(x=MOTworkhours6, y=CHItokens, colour=MOTwork6, shape=MOTwork6), position=position_jitter(0.1), size=3) +
+  scale_colour_manual(name = "Care Schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values = c("#F8766D", "#00BA38", "#619CFF")) +
+  scale_shape_manual(name = "Care schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values=c(0,1,2)) +
+  geom_smooth(mapping=aes(x=MOTworkhours6, y=CHItokens), method='lm') +
+  guides(fill=guide_legend(title=NULL)) +
+  ylab('Word tokens produced at 1;5') + xlab("Mothers' weekly work hours at 6m") +
+  theme_bw(base_size=12) +
+  theme(legend.position = 'none')
+
+multiplot(FigS2a, FigS2b, cols=2)
+
+```
+
+```{r Distribution of working hours across groups 18m}
+FigS3a <- ggplot(workdata) +
+  geom_point(mapping=aes(x=MOTworkhours18, y=CHItypes, colour=MOTwork18, shape=MOTwork18), position=position_jitter(0.1), size=3) +
+  scale_colour_manual(name = "Care Schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values = c("#F8766D", "#00BA38", "#619CFF")) +
+  scale_shape_manual(name = "Care schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values=c(0,1,2)) +
+  geom_smooth(mapping=aes(x=MOTworkhours18, y=CHItypes), method='lm') +
+  guides(fill=guide_legend(title=NULL)) +
+  ylab('Word types produced at 1;5') + xlab("Mothers' weekly work hours at 18m") +
+  theme_bw(base_size=12) +
+  theme(legend.position = 'none')
+
+FigS3b <- ggplot(workdata) +
+  geom_point(mapping=aes(x=MOTworkhours18, y=CHItokens, colour=MOTwork18, shape=MOTwork18), position=position_jitter(0.1), size=3) +
+  scale_colour_manual(name = "Care Schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values = c("#F8766D", "#00BA38", "#619CFF")) +
+  scale_shape_manual(name = "Care schedule", labels = c("Home-only", "Mixed-care", "Care-only"), values=c(0,1,2)) +
+  geom_smooth(mapping=aes(x=MOTworkhours18, y=CHItokens), method='lm') +
+  guides(fill=guide_legend(title=NULL)) +
+  ylab('Word tokens produced at 1;5') + xlab("Mothers' weekly work hours at 18m") +
+  theme_bw(base_size=12) +
+  theme(legend.position = 'none')
+
+multiplot(FigS3a, FigS3b, cols=2)
+
+```
+
+```{r Correlation between mothers work hours and productive vocabulary and household Income}
+
+cor.test(workdata$HouseholdIncome18, workdata$HouseholdIncome6, method = 'pearson') # Significant
+cor.test(workdata$MOTworkhours6, workdata$HouseholdIncome6, method = 'pearson') # Significant
+cor.test(workdata$MOTworkhours18, workdata$HouseholdIncome6, method = 'pearson') # Significant
+cor.test(workdata$Log.Types, workdata$HouseholdIncome6, method = 'pearson') # Not Significant
+cor.test(workdata$Log.Tokens, workdata$HouseholdIncome6, method = 'pearson') # Not Significant
+
+cor.test(workdata$MOTworkhours6, workdata$HouseholdIncome18, method = 'pearson') # Significant
+cor.test(workdata$MOTworkhours18, workdata$HouseholdIncome18, method = 'pearson') # Marginal
+cor.test(workdata$Log.Types, workdata$HouseholdIncome18, method = 'pearson') # Not Significant
+cor.test(workdata$Log.Tokens, workdata$HouseholdIncome18, method = 'pearson') # Not Significant
+
+
+cor.test(workdata$MOTworkhours18, workdata$MOTworkhours6, method = 'pearson') # Significant
+cor.test(workdata$Log.Types, workdata$MOTworkhours6, method = 'pearson') # Marginal
+cor.test(workdata$Log.Tokens, workdata$MOTworkhours6, method = 'pearson') # Not Significant
+
+cor.test(workdata$Log.Types, workdata$MOTworkhours18, method = 'pearson') # Marginal
+cor.test(workdata$Log.Tokens, workdata$MOTworkhours18, method = 'pearson') # Not Significant
+
+cor.test(workdata$Log.Tokens, workdata$Log.Types, method = 'pearson') # Not Significant
+
+```
